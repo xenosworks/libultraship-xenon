@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "Context.h"
+#include "gfx_xsdk.h"
 #include "window/Window.h"
 #include "xsdk/gpu.h"
 #include "xsdk/log.h"
@@ -141,6 +142,7 @@ bool GfxWindowBackendXsdk::IsFrameReady() {
 }
 
 void GfxWindowBackendXsdk::SwapBuffersBegin() {
+    mPresented = false;
     if (!mPresenting) {
         return;
     }
@@ -150,9 +152,16 @@ void GfxWindowBackendXsdk::SwapBuffersBegin() {
         xsdk_log_write("gfx_xsdk: xsdk_present_begin failed: 0x%08X", (unsigned)status);
         return;
     }
-    // Nothing draws yet: each frame clears to a blue a step brighter, so a title that stops shows a still screen.
-    xsdk_gpu_resolve(address, mWidth, mHeight, 0xFF000000 | (mFrames++ & 0x7F) << 1);
+#ifdef XSDK_FAST3D_NULL
+    // Nothing draws: each frame clears to a blue a step brighter, so a title that stops shows a still screen.
+    const uint32_t clear = 0xFF000000 | (mFrames++ & 0x7F) << 1;
+#else
+    // The screen gfx_xsdk drew, framebuffer 0, cleared for the next frame as GL clears (gfx_opengl.cpp:800).
+    const uint32_t clear = XSDK_CLEAR_ARGB;
+#endif
+    xsdk_gpu_resolve(address, mWidth, mHeight, clear);
     xsdk_present_end();
+    mPresented = true;
 }
 
 void GfxWindowBackendXsdk::SwapBuffersEnd() {
@@ -182,6 +191,10 @@ bool GfxWindowBackendXsdk::IsRunning() {
 }
 
 void GfxWindowBackendXsdk::Destroy() {
+    // The backend's GPU memory goes before the GPU closes.
+    if (mRenderer != nullptr) {
+        mRenderer->Release();
+    }
     if (mPresenting) {
         xsdk_present_close();
         mPresenting = false;
@@ -197,5 +210,13 @@ void GfxWindowBackendXsdk::Destroy() {
 
 bool GfxWindowBackendXsdk::IsFullscreen() {
     return true;
+}
+
+void GfxWindowBackendXsdk::SetRenderer(GfxRenderingAPIXsdk* renderer) {
+    mRenderer = renderer;
+}
+
+bool GfxWindowBackendXsdk::Presented() const {
+    return mPresented;
 }
 } // namespace Fast

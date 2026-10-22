@@ -5,6 +5,8 @@
 #include <cstdint>
 
 namespace Fast {
+class GfxRenderingAPIXsdk;
+
 // The Xbox 360's screen through xsdk: always full screen at 1280x720, no mouse or keyboard.
 class GfxWindowBackendXsdk final : public GfxWindowBackend {
   public:
@@ -40,7 +42,14 @@ class GfxWindowBackendXsdk final : public GfxWindowBackend {
     void Destroy() override;
     bool IsFullscreen() override;
 
+    // The backend drawing into the screen, whose GPU memory goes before the GPU closes.
+    void SetRenderer(GfxRenderingAPIXsdk* renderer);
+    // Whether the last SwapBuffersBegin resolved the screen into a front buffer, clearing its eDRAM.
+    bool Presented() const;
+
   private:
+    GfxRenderingAPIXsdk* mRenderer = nullptr;
+    bool mPresented = false;
     uint32_t mWidth = 0;
     uint32_t mHeight = 0;
     bool mGpuOpen = false;

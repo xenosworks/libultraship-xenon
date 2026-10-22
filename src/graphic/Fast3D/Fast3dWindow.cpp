@@ -147,8 +147,8 @@ void Fast3dWindow::InitWindowManager() {
 #endif
 #ifdef __XSDK__
         case Ship::WindowBackend::FAST3D_XSDK:
-            mRenderingApi = new GfxRenderingAPIXsdk();
             mWindowManagerApi = new GfxWindowBackendXsdk();
+            mRenderingApi = new GfxRenderingAPIXsdk(static_cast<GfxWindowBackendXsdk*>(mWindowManagerApi));
             break;
 #endif
         default:
