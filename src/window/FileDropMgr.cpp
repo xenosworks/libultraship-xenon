@@ -11,7 +11,8 @@
 #endif
 #include "Context.h"
 #include "Window.h"
-#ifdef __unix__
+// xsdk's GCC defines __unix__, but the console has no dynamic linker to name a function.
+#if defined(__unix__) && !defined(__XSDK__)
 #include <dlfcn.h>
 #include <cxxabi.h>
 #endif
@@ -50,7 +51,7 @@ char* FileDropMgr::GetDroppedFile() const {
 }
 
 static void PrintRegError(void* funcAddr) {
-#ifdef __unix__
+#if defined(__unix__) && !defined(__XSDK__)
     Dl_info info;
     int gotAddress = dladdr(funcAddr, &info);
     const char* nameFound = info.dli_sname;
