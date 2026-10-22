@@ -5,6 +5,15 @@ target_link_libraries(ImGui PUBLIC SDL2::SDL2)
 # ImGui opens links with fork and execvp on a POSIX system, which the console has no way to do.
 target_compile_definitions(ImGui PRIVATE IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS)
 
+# imgui-xenon's backend for xsdk's GPU layer and controller 1, from its repository, built against this ImGui
+# (imgui-xenon:docs/README-xsdk.md).
+set(IMGUI_XENON_DIR "" CACHE PATH "imgui-xenon's repository, whose backends/imgui_impl_xsdk.cpp draws ImGui")
+if (NOT EXISTS "${IMGUI_XENON_DIR}/backends/imgui_impl_xsdk.cpp")
+    message(FATAL_ERROR "IMGUI_XENON_DIR isn't imgui-xenon's repository: '${IMGUI_XENON_DIR}'")
+endif()
+target_sources(ImGui PRIVATE "${IMGUI_XENON_DIR}/backends/imgui_impl_xsdk.cpp")
+target_include_directories(ImGui PUBLIC "${IMGUI_XENON_DIR}/backends")
+
 #=================== gfx_xsdk ===================
 option(XSDK_FAST3D_NULL "gfx_xsdk draws nothing, and counts and times what Fast3D asks of it" OFF)
 if (NOT XSDK_FAST3D_NULL)

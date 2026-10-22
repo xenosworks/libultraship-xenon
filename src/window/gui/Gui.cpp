@@ -42,6 +42,10 @@
 
 #endif
 
+#ifdef __XSDK__
+#include <imgui_impl_xsdk.h>
+#endif
+
 #if defined(ENABLE_DX11) || defined(ENABLE_DX12)
 #include <graphic/Fast3D/backends/gfx_direct3d11.h>
 #include <imgui_impl_dx11.h>
@@ -212,6 +216,11 @@ void Gui::ShutDownImGui(Ship::Window* window) {
             ImGui_ImplDX11_Shutdown();
             break;
 #endif
+#ifdef __XSDK__
+        case WindowBackend::FAST3D_XSDK:
+            // The window backend shut it down before closing the GPU (gfx_xsdk_window.cpp, Destroy).
+            break;
+#endif
     }
     ImGui::DestroyContext();
 }
@@ -247,13 +256,12 @@ void Gui::ImGuiBackendInit() {
             break;
 #endif
 #ifdef __XSDK__
-        case WindowBackend::FAST3D_XSDK: {
-            // TODO: imgui-xenon's ImGui_ImplXsdk_Init; until then the font atlas is built as a renderer would.
-            unsigned char* pixels;
-            int width, height;
-            mImGuiIo->Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+        case WindowBackend::FAST3D_XSDK:
+            // Renderer and platform both, on xsdk's GPU layer and controller 1 (imgui-xenon:docs/README-xsdk.md).
+            if (!ImGui_ImplXsdk_Init()) {
+                SPDLOG_ERROR("ImGui_ImplXsdk_Init failed");
+            }
             break;
-        }
 #endif
         default:
             break;
@@ -395,9 +403,9 @@ void Gui::ImGuiWMNewFrame() {
 #endif
 #ifdef __XSDK__
         case WindowBackend::FAST3D_XSDK: {
-            // TODO: imgui-xenon's ImGui_ImplXsdk_NewFrame; the game's size comes from ImGui's (CalculateGameViewport).
+            // The game's size comes from ImGui's display (CalculateGameViewport).
             auto window = Context::GetInstance()->GetWindow();
-            mImGuiIo->DisplaySize = ImVec2(window->GetWidth(), window->GetHeight());
+            ImGui_ImplXsdk_NewFrame(window->GetWidth(), window->GetHeight());
             break;
         }
 #endif
@@ -845,7 +853,10 @@ void Gui::ImGuiRenderDrawData(ImDrawData* data) {
 #endif
 #ifdef __XSDK__
         case WindowBackend::FAST3D_XSDK:
-            // TODO: imgui-xenon's ImGui_ImplXsdk_RenderDrawData; nothing draws ImGui yet.
+#ifndef XSDK_FAST3D_NULL
+            // Into the screen gfx_xsdk left set, before the window presents it.
+            ImGui_ImplXsdk_RenderDrawData(data);
+#endif
             break;
 #endif
         default:

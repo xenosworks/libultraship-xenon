@@ -6,6 +6,7 @@
 
 #include "Context.h"
 #include "gfx_xsdk.h"
+#include "imgui_impl_xsdk.h"
 #include "window/Window.h"
 #include "xsdk/gpu.h"
 #include "xsdk/log.h"
@@ -197,9 +198,13 @@ bool GfxWindowBackendXsdk::IsRunning() {
 }
 
 void GfxWindowBackendXsdk::Destroy() {
-    // The backend's GPU memory goes before the GPU closes.
+    // What draws through the GPU goes before it closes: the backend's memory, then ImGui's, whose backend Gui::Init
+    // started from Init above.
     if (mRenderer != nullptr) {
         mRenderer->Release();
+    }
+    if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendRendererUserData != nullptr) {
+        ImGui_ImplXsdk_Shutdown();
     }
     if (mPresenting) {
         xsdk_present_close();
