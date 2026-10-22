@@ -1235,6 +1235,28 @@ bool VerifyMatches(const LoadedVertex& a, const LoadedVertex& b, float tolerance
            near_byte(a.color.r, b.color.r) && near_byte(a.color.g, b.color.g) && near_byte(a.color.b, b.color.b) &&
            near_byte(a.color.a, b.color.a) && ((a.clip_rej ^ b.clip_rej) & SettledClipBits(a, tolerance)) == 0;
 }
+
+// Divide127 bit for bit against fdivs, on every 64th float from 1/256 to 384, past what a dot product with n reaches.
+void VerifyDivide127() {
+    uint32_t checked = 0;
+    uint32_t differ = 0;
+    alignas(16) float in[4];
+    alignas(16) float out[4];
+    for (uint32_t bits = 0x3B800000u; bits < 0x43C00000u; bits += 4 << 6) {
+        for (uint32_t k = 0; k < 4; k++) {
+            const uint32_t lane = bits + (k << 6);
+            memcpy(&in[k], &lane, sizeof(lane));
+        }
+        vec_st(Divide127(vec_ld(0, in)), 0, out);
+        for (uint32_t k = 0; k < 4; k++) {
+            const float quotient = in[k] / 127.0f;
+            differ += memcmp(&quotient, &out[k], sizeof(quotient)) != 0;
+            checked++;
+        }
+    }
+    xsdk_log_write("Fast3D VMX check: Divide127 differs from fdivs on %u of %u floats", (unsigned)differ,
+                   (unsigned)checked);
+}
 #endif
 } // namespace
 
@@ -1248,6 +1270,9 @@ bool Interpreter::GfxSpVertexXsdk(size_t n_vertices, size_t dest_index, const F3
     // The scalar code first, as the reference, then the VMX, whose vertices are kept.
     if (sVerifyScalar) {
         return false;
+    }
+    if (sVerifyStart == 0) {
+        VerifyDivide127();
     }
     sVerifyScalar = true;
     GfxSpVertex(n_vertices, dest_index, vertices);
