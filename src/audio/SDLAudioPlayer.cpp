@@ -21,6 +21,12 @@ bool SDLAudioPlayer::DoInit() {
     want.channels = mNumChannels;
     want.samples = this->GetSampleLength();
     want.callback = NULL;
+#ifdef __XSDK__
+    // SDL's device thread on hardware thread 5, off the main thread's core (SDL-xenon:include/SDL3/SDL_hints.h).
+    if (!SDL_SetHint("SDL_AUDIO_XSDK_HARDWARE_THREAD", "5")) {
+        SPDLOG_WARN("SDL_SetHint(SDL_AUDIO_XSDK_HARDWARE_THREAD) failed");
+    }
+#endif
     mDevice = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (mDevice == 0) {
         SPDLOG_ERROR("SDL_OpenAudio error: {}", SDL_GetError());
