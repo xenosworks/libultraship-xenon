@@ -157,6 +157,13 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_opengl*")
 endif()
 
+if (XSDK)
+    list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_opengl*")
+    list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_sdl2*")
+else()
+    list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_xsdk*")
+endif()
+
 source_group("graphic" FILES ${Source_Files__Graphic})
 source_group("graphic_debug" FILES ${Source_Files__Graphic_Debug})
 target_sources(libultraship PRIVATE ${Source_Files__Graphic})
@@ -280,7 +287,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     endif()
 else()
     target_compile_definitions(libultraship PRIVATE
-        ENABLE_OPENGL
+        $<$<NOT:$<BOOL:${XSDK}>>:ENABLE_OPENGL>
         $<$<CONFIG:Debug>:_DEBUG>
         $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
         $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=0>

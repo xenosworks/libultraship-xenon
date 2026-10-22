@@ -27,11 +27,14 @@ target_sources(ImGui
     ${imgui_SOURCE_DIR}/imgui.cpp
 )
 
+# xsdk has no OpenGL, and its ImGui backend reads the controller itself.
+if (NOT XSDK)
 target_sources(ImGui
     PRIVATE
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
 )
+endif()
 
 target_include_directories(ImGui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends PRIVATE ${SDL2_INCLUDE_DIRS})
 
