@@ -56,7 +56,11 @@ void main() {
 @for(i in 0..o_inputs)
     vInput@{i + 1} = aInput@{i + 1};
 @end
-    gl_Position = aVtxPos;
+    // GL_DEPTH_CLAMP's part (gfx_opengl.cpp:668), a vertex at a time with the GPU's clipping left on: Xenos's
+    // clip_disable stops all clipping, which draws triangles behind the camera wrongly (milestone 61's captures).
+    vec4 position = aVtxPos;
+    position.z = aVtxPos.w > 0.0 ? min(max(aVtxPos.z, 0.0), aVtxPos.w) : aVtxPos.z;
+    gl_Position = position;
 }
 )glsl";
 

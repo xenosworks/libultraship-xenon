@@ -498,7 +498,6 @@ void GfxRenderingAPIXsdk::ApplyState() {
             raster.fill = XSDK_FILL_SOLID;
             raster.depth_bias = DECAL_DEPTH_BIAS;
             raster.depth_bias_slope = slope;
-            raster.depth_clamp = true;
             XsdkRasterState state;
             xsdk_gpu_raster_state(&state, &raster);
             xsdk_gpu_set_raster(&state);
@@ -515,8 +514,8 @@ void GfxRenderingAPIXsdk::ApplyState() {
         // Pixel centres on whole numbers, D3D9's, so GL's half a pixel up and left (vulkan4xenon:src/queue.c:151-160).
         xsdk_gpu_set_viewport((float)mViewport.x - 0.5f, (float)top - 0.5f, (float)mViewport.width,
                               (float)mViewport.height, 0.0f, 1.0f);
-        // Depth clamp turns clipping off, and Xenos draws past the viewport as far as the scissor
-        // (vulkan4xenon:src/queue.c:152-153), so the scissor stops at the viewport, as GL's clipping would.
+        // Xenos draws past the viewport as far as the scissor (vulkan4xenon:src/queue.c:152-153), so the scissor
+        // stops at the viewport, as GL's clipping would.
         const int left = std::max({ mScissor.x, mViewport.x, 0 });
         const int right = std::min({ mScissor.x + mScissor.width, mViewport.x + mViewport.width, (int)fb.width });
         const int upper = std::max({ height - mScissor.y - mScissor.height, top, 0 });
@@ -695,11 +694,11 @@ void GfxRenderingAPIXsdk::Init() {
     blend.alpha_dest = XSDK_BLEND_ONE_MINUS_SRC_ALPHA;
     blend.write_mask = XSDK_WRITE_ALL;
     xsdk_gpu_blend_state(&mBlendAlpha, &blend);
-    // No culling, as Fast3D culls (interpreter.cpp:1362-1404), and depth clamp, GL_DEPTH_CLAMP (gfx_opengl.cpp:668).
+    // No culling, as Fast3D culls (interpreter.cpp:1362-1404). GL_DEPTH_CLAMP (gfx_opengl.cpp:668) is the vertex
+    // shader's, not XsdkRaster's depth_clamp, which turns off all clipping (gfx_xsdk_glsl.cpp).
     XsdkRaster raster = {};
     raster.cull = XSDK_CULL_NONE;
     raster.fill = XSDK_FILL_SOLID;
-    raster.depth_clamp = true;
     xsdk_gpu_raster_state(&mRasterPlain, &raster);
 
 #ifndef XSDK_FAST3D_NULL
