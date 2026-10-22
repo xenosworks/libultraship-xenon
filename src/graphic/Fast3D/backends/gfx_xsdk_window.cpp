@@ -1,8 +1,11 @@
 #include "gfx_xsdk_window.h"
 
 #include <SDL2/SDL.h>
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <thread>
+#include <vector>
 
 #include "Context.h"
 #include "gfx_xsdk.h"
@@ -12,6 +15,7 @@
 #include "xsdk/log.h"
 #include "xsdk/present.h"
 #include "xsdk/splash.h"
+#include "xsdk/texture.h"
 
 namespace Fast {
 static constexpr uint32_t BUFFERS = 2;
@@ -24,6 +28,57 @@ static constexpr uint32_t BEGIN_TIMEOUT_MS = 5000;
 static int64_t NowNs() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
         .count();
+}
+
+// The frames game:\capture.txt names, whitespace apart, ascending; none without the file.
+static std::vector<uint32_t> ReadCaptures() {
+    std::vector<uint32_t> frames;
+    FILE* file = std::fopen("game:\\capture.txt", "r");
+    if (file == nullptr) {
+        return frames;
+    }
+    unsigned frame;
+    while (std::fscanf(file, "%u", &frame) == 1) {
+        frames.push_back(frame);
+    }
+    std::fclose(file);
+    std::sort(frames.begin(), frames.end());
+    xsdk_log_write("gfx_xsdk: capturing %u frames named in game:\\capture.txt", (unsigned)frames.size());
+    return frames;
+}
+
+// The frame resolved into a front buffer, which holds what B8G8R8A8 textures are resolved as (xsdk:src/gpu.c:617-620),
+// read back once the GPU is done and written as a PPM.
+static void Capture(uint32_t address, uint32_t width, uint32_t height, uint32_t frame) {
+    const NTSTATUS waited = xsdk_gpu_wait(xsdk_gpu_fence(), 1000);
+    XsdkTexture front;
+    if (!NT_SUCCESS(waited) || !NT_SUCCESS(xsdk_texture_init(&front, XSDK_FORMAT_B8G8R8A8, width, height, 1, true))) {
+        xsdk_log_write("gfx_xsdk: frame %u not captured", (unsigned)frame);
+        return;
+    }
+    xsdk_texture_attach(&front, xsdk_present_pixels(address));
+    std::vector<uint8_t> bgra(width * height * 4);
+    xsdk_texture_download_rows(&front, 0, 0, height, bgra.data(), width * 4);
+    char path[64];
+    std::snprintf(path, sizeof(path), "game:\\capture_%u.ppm", (unsigned)frame);
+    FILE* file = std::fopen(path, "wb");
+    if (file == nullptr) {
+        xsdk_log_write("gfx_xsdk: %s not written", path);
+        return;
+    }
+    std::fprintf(file, "P6\n%u %u\n255\n", (unsigned)width, (unsigned)height);
+    std::vector<uint8_t> rgb(width * 3);
+    for (uint32_t y = 0; y < height; y++) {
+        for (uint32_t x = 0; x < width; x++) {
+            const uint8_t* texel = &bgra[(y * width + x) * 4];
+            rgb[x * 3] = texel[2];
+            rgb[x * 3 + 1] = texel[1];
+            rgb[x * 3 + 2] = texel[0];
+        }
+        std::fwrite(rgb.data(), 1, rgb.size(), file);
+    }
+    std::fclose(file);
+    xsdk_log_write("gfx_xsdk: frame %u captured to %s", (unsigned)frame, path);
 }
 
 void GfxWindowBackendXsdk::Init(const char* gameName, const char* apiName, bool startFullScreen, uint32_t width,
@@ -49,6 +104,7 @@ void GfxWindowBackendXsdk::Init(const char* gameName, const char* apiName, bool 
         mPresenting = NT_SUCCESS(status);
     }
     mFrameDueNs = NowNs();
+    mCaptures = ReadCaptures();
     Ship::Context::GetInstance()->GetWindow()->GetGui()->Init(Ship::GuiWindowInitData{});
 }
 
@@ -169,6 +225,11 @@ void GfxWindowBackendXsdk::SwapBuffersBegin() {
     xsdk_gpu_resolve(address, mWidth, mHeight, clear);
     xsdk_present_end();
     mPresented = true;
+    mPresents++;
+    if (!mCaptures.empty() && mCaptures.front() == mPresents) {
+        mCaptures.erase(mCaptures.begin());
+        Capture(address, mWidth, mHeight, mPresents);
+    }
 }
 
 void GfxWindowBackendXsdk::SwapBuffersEnd() {

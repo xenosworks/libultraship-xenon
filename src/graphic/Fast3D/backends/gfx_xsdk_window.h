@@ -3,6 +3,7 @@
 #include "gfx_window_manager_api.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace Fast {
 class GfxRenderingAPIXsdk;
@@ -57,5 +58,8 @@ class GfxWindowBackendXsdk final : public GfxWindowBackend {
     uint32_t mFrames = 0;
     // When the next frame may start, in nanoseconds of the monotonic clock.
     int64_t mFrameDueNs = 0;
+    // Frames presented, and those game:\capture.txt names to save as game:\capture_<frame>.ppm, ascending.
+    uint32_t mPresents = 0;
+    std::vector<uint32_t> mCaptures;
 };
 } // namespace Fast
