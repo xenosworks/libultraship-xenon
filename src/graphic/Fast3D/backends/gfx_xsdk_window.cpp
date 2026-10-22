@@ -128,9 +128,15 @@ void GfxWindowBackendXsdk::HandleEvents() {
     }
 }
 
+// At the refresh rate or above, xsdk_present_begin paces each frame to vblank, as it waits for a buffer to come off
+// screen; below it, frames are held here as well.
 bool GfxWindowBackendXsdk::IsFrameReady() {
-    const int64_t periodNs = 1000000000LL / (mTargetFps > 0 ? mTargetFps : REFRESH_RATE);
     const int64_t now = NowNs();
+    if (mTargetFps <= 0 || (uint32_t)mTargetFps >= REFRESH_RATE) {
+        mFrameDueNs = now;
+        return true;
+    }
+    const int64_t periodNs = 1000000000LL / mTargetFps;
     if (mFrameDueNs > now) {
         std::this_thread::sleep_for(std::chrono::nanoseconds(mFrameDueNs - now));
     } else if (now - mFrameDueNs > periodNs) {
