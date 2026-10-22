@@ -160,6 +160,10 @@ endif()
 if (XSDK)
     list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_opengl*")
     list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_sdl2*")
+    # Built with XSDK_FAST3D_NULL, gfx_xsdk compiles no shaders (cmake/dependencies/xsdk.cmake).
+    if (XSDK_FAST3D_NULL)
+        list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_xsdk_shader*")
+    endif()
 else()
     list(FILTER Source_Files__Graphic EXCLUDE REGEX "graphic/Fast3D/backends/gfx_xsdk*")
 endif()
@@ -235,6 +239,14 @@ if (USE_OPENGLES)
 endif()
 
 target_link_libraries(libultraship PUBLIC prism)
+
+if (XSDK)
+    if (XSDK_FAST3D_NULL)
+        target_compile_definitions(libultraship PRIVATE XSDK_FAST3D_NULL)
+    else()
+        target_link_libraries(libultraship PRIVATE glslang glslang-default-resource-limits)
+    endif()
+endif()
 
 #=================== Compile Options & Defs ===================
 
