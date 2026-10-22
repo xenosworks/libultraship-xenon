@@ -302,7 +302,11 @@ WindowBackend Config::GetWindowBackend() {
         return WindowBackend::FAST3D_SDL_METAL;
     }
 #endif
+#ifdef __XSDK__
+    return WindowBackend::FAST3D_XSDK;
+#else
     return WindowBackend::FAST3D_SDL_OPENGL;
+#endif
 }
 
 void Config::SetWindowBackend(WindowBackend backend) {
@@ -318,6 +322,11 @@ void Config::SetWindowBackend(WindowBackend backend) {
         case WindowBackend::FAST3D_SDL_METAL:
             SetString("Window.Backend.Name", "Metal");
             break;
+#ifdef __XSDK__
+        case WindowBackend::FAST3D_XSDK:
+            SetString("Window.Backend.Name", "xsdk");
+            break;
+#endif
         default:
             SetString("Window.Backend.Name", "");
     }

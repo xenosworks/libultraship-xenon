@@ -11,6 +11,10 @@
 #include "graphic/Fast3D/backends/gfx_metal.h"
 #include "graphic/Fast3D/backends/gfx_direct3d_common.h"
 #include "graphic/Fast3D/backends/gfx_direct3d11.h"
+#ifdef __XSDK__
+#include "graphic/Fast3D/backends/gfx_xsdk.h"
+#include "graphic/Fast3D/backends/gfx_xsdk_window.h"
+#endif
 #include "backends/gfx_window_manager_api.h"
 
 #include <fstream>
@@ -33,7 +37,11 @@ Fast3dWindow::Fast3dWindow(std::shared_ptr<Ship::Gui> gui) : Ship::Window(gui) {
         AddAvailableWindowBackend(Ship::WindowBackend::FAST3D_SDL_METAL);
     }
 #endif
+#ifdef __XSDK__
+    AddAvailableWindowBackend(Ship::WindowBackend::FAST3D_XSDK);
+#else
     AddAvailableWindowBackend(Ship::WindowBackend::FAST3D_SDL_OPENGL);
+#endif
 }
 
 Fast3dWindow::Fast3dWindow(std::vector<std::shared_ptr<Ship::GuiWindow>> guiWindows)
@@ -135,6 +143,12 @@ void Fast3dWindow::InitWindowManager() {
         case Ship::WindowBackend::FAST3D_SDL_METAL:
             mRenderingApi = new GfxRenderingAPIMetal();
             mWindowManagerApi = new GfxWindowBackendSDL2();
+            break;
+#endif
+#ifdef __XSDK__
+        case Ship::WindowBackend::FAST3D_XSDK:
+            mRenderingApi = new GfxRenderingAPIXsdk();
+            mWindowManagerApi = new GfxWindowBackendXsdk();
             break;
 #endif
         default:
