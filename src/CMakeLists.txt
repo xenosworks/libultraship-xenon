@@ -246,6 +246,9 @@ if (XSDK)
     else()
         target_link_libraries(libultraship PRIVATE glslang glslang-default-resource-limits)
     endif()
+    if (XSDK_FAST3D_VMX_VERIFY)
+        target_compile_definitions(libultraship PRIVATE XSDK_FAST3D_VMX_VERIFY)
+    endif()
 endif()
 
 #=================== Compile Options & Defs ===================

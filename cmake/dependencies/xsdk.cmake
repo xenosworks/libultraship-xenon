@@ -16,6 +16,7 @@ target_include_directories(ImGui PUBLIC "${IMGUI_XENON_DIR}/backends")
 
 #=================== gfx_xsdk ===================
 option(XSDK_FAST3D_NULL "gfx_xsdk draws nothing, and counts and times what Fast3D asks of it" OFF)
+option(XSDK_FAST3D_VMX_VERIFY "GfxSpVertex runs its scalar code and its VMX on every vertex, and logs where they differ" OFF)
 if (NOT XSDK_FAST3D_NULL)
     # glslang, for the programs gfx_xsdk compiles on the console: GLSL to SPIR-V alone, as glslang-xenon's xsdk/
     # builds it.

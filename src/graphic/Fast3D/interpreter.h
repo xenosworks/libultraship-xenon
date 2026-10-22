@@ -227,11 +227,18 @@ struct ShaderMod {
 #define MAX_LIGHTS 32
 #define MAX_VERTICES 64
 
+// On xsdk, GfxSpVertex's VMX loads and stores these 16 bytes at a time (interpreter.cpp).
+#ifdef __XSDK__
+#define RSP_VMX_ALIGNED alignas(16)
+#else
+#define RSP_VMX_ALIGNED
+#endif
+
 struct RSP {
-    float modelview_matrix_stack[11][4][4];
+    RSP_VMX_ALIGNED float modelview_matrix_stack[11][4][4];
     uint8_t modelview_matrix_stack_size;
 
-    float MP_matrix[4][4];
+    RSP_VMX_ALIGNED float MP_matrix[4][4];
     float P_matrix[4][4];
 
     F3DLight_t lookat[2];
@@ -251,7 +258,7 @@ struct RSP {
         uint16_t s, t;
     } texture_scaling_factor;
 
-    struct LoadedVertex loaded_vertices[MAX_VERTICES + 4];
+    RSP_VMX_ALIGNED struct LoadedVertex loaded_vertices[MAX_VERTICES + 4];
     ShaderMod current_shader;
 };
 
@@ -411,6 +418,10 @@ class Interpreter {
     void GfxSpMatrix(uint8_t params, const int32_t* addr);
     void GfxSpPopMatrix(uint32_t count);
     void GfxSpVertex(size_t numVertices, size_t destIndex, const F3DVtx* vertices);
+#ifdef __XSDK__
+    bool GfxSpVertexXsdk(size_t numVertices, size_t destIndex, const F3DVtx* vertices);
+    void GfxSpVertexVmx(size_t numVertices, size_t destIndex, const F3DVtx* vertices);
+#endif
     void GfxSpModifyVertex(uint16_t vtxIdx, uint8_t where, uint32_t val);
     void GfxSpTri1(uint8_t vtx1Idx, uint8_t vtx2Idx, uint8_t vtx3Idx, bool isRect);
     void GfxSpGeometryMode(uint32_t clear, uint32_t set);

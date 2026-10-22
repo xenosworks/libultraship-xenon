@@ -37,6 +37,13 @@
 
 #include <spdlog/fmt/fmt.h>
 
+#ifdef __XSDK__
+#include <altivec.h>
+#ifdef XSDK_FAST3D_VMX_VERIFY
+#include "xsdk/log.h"
+#endif
+#endif
+
 std::stack<std::string> currentDir;
 
 #define SEG_ADDR(seg, addr) (addr | (seg << 24) | 1)
@@ -1152,7 +1159,320 @@ void Interpreter::AdjustWidthHeightForScale(uint32_t& width, uint32_t& height, u
     }
 }
 
+#ifdef __XSDK__
+namespace {
+typedef __vector float VFloat;
+typedef __vector signed int VInt;
+typedef __vector unsigned char VByte;
+
+// Adding -0 leaves a product as it is, as adding +0 doesn't for -0.
+const VFloat kNegativeZero = { -0.0f, -0.0f, -0.0f, -0.0f };
+const VFloat kZero = { 0.0f, 0.0f, 0.0f, 0.0f };
+const VFloat kOne = { 1.0f, 1.0f, 1.0f, 1.0f };
+const VFloat kMinusOne = { -1.0f, -1.0f, -1.0f, -1.0f };
+const VFloat kQuarter = { 0.25f, 0.25f, 0.25f, 0.25f };
+
+static_assert(sizeof(LoadedVertex) % 16 == 0, "every loaded vertex starts on 16 bytes, as the first does");
+
+// Lane n in all four lanes. This GCC takes vec_splat through the stack; a vec_perm of constant bytes is one vspltw.
+template <int n> inline VFloat Splat(VFloat v) {
+    const VByte lane = { 4 * n, 4 * n + 1, 4 * n + 2, 4 * n + 3, 4 * n, 4 * n + 1, 4 * n + 2, 4 * n + 3,
+                         4 * n, 4 * n + 1, 4 * n + 2, 4 * n + 3, 4 * n, 4 * n + 1, 4 * n + 2, 4 * n + 3 };
+    return vec_perm(v, v, lane);
+}
+
+// The 16 bytes at any address, from the two quadwords holding them.
+inline VByte LoadUnaligned(const void* address) {
+    const unsigned char* bytes = static_cast<const unsigned char*>(address);
+    return vec_perm(vec_ld(0, bytes), vec_ld(15, bytes), vec_lvsl(0, bytes));
+}
+
+// a / 127.0f as fdivs rounds it: a times 1/127, then two of Markstein's corrections, the second of which rounds a
+// quotient within an ulp correctly (P. Markstein, IBM J. Res. Develop. 34(1), 1990, 111-119).
+inline VFloat Divide127(VFloat a) {
+    const VFloat divisor = { 127.0f, 127.0f, 127.0f, 127.0f };
+    const VFloat reciprocal = { 1.0f / 127.0f, 1.0f / 127.0f, 1.0f / 127.0f, 1.0f / 127.0f };
+    VFloat q = vec_madd(a, reciprocal, kNegativeZero);
+    q = vec_madd(vec_nmsub(q, divisor, a), reciprocal, q);
+    return vec_madd(vec_nmsub(q, divisor, a), reciprocal, q);
+}
+
+// Ship::Math::clamp's comparisons, lane by lane (utils/Utils.cpp:11-14).
+inline VFloat Clamp(VFloat d, VFloat min, VFloat max) {
+    const VFloat t = vec_sel(d, min, vec_cmplt(d, min));
+    return vec_sel(t, max, vec_cmpgt(t, max));
+}
+
+#ifdef XSDK_FAST3D_VMX_VERIFY
+// The time base: 49.875 ticks a microsecond (xsdk:src/time.c:22-26).
+constexpr uint32_t kVerifyWindowTicks = 10 * 49875000u;
+bool sVerifyScalar;
+bool sVerifyLogged;
+uint32_t sVerifyStart;
+uint32_t sVerified;
+uint32_t sMismatched;
+
+uint32_t VerifyTicks() {
+    uint32_t ticks;
+    __asm__ volatile("mftb %0" : "=r"(ticks));
+    return ticks;
+}
+
+// The clip bits whose comparison is further from equal than rounding reaches.
+uint8_t SettledClipBits(const LoadedVertex& v, float tolerance) {
+    return (fabsf(v.x + v.w) > tolerance ? 1 : 0) | (fabsf(v.x - v.w) > tolerance ? 2 : 0) |
+           (fabsf(v.y + v.w) > tolerance ? 4 : 0) | (fabsf(v.y - v.w) > tolerance ? 8 : 0) |
+           (fabsf(v.z - v.w) > tolerance ? 32 : 0);
+}
+
+// Positions within the tolerance, colours and fog within 1, texture coordinates within 4, as texgen's acosf steepens
+// near 1, and the settled clip bits the same.
+bool VerifyMatches(const LoadedVertex& a, const LoadedVertex& b, float tolerance) {
+    const auto near = [](float p, float q, float most) { return fabsf(p - q) <= most; };
+    const auto near_byte = [](uint8_t p, uint8_t q) { return abs(p - q) <= 1; };
+    return near(a.x, b.x, tolerance) && near(a.y, b.y, tolerance) && near(a.z, b.z, tolerance) &&
+           near(a.w, b.w, tolerance) && near(a.u, b.u, 4.0f) && near(a.v, b.v, 4.0f) &&
+           near_byte(a.color.r, b.color.r) && near_byte(a.color.g, b.color.g) && near_byte(a.color.b, b.color.b) &&
+           near_byte(a.color.a, b.color.a) && ((a.clip_rej ^ b.clip_rej) & SettledClipBits(a, tolerance)) == 0;
+}
+#endif
+} // namespace
+
+// Point lights divide by and take the root of each vertex's distance, which VMX doesn't round as the FPU does, so
+// they stay scalar; Starship sets no G_LIGHTING_POSITIONAL.
+bool Interpreter::GfxSpVertexXsdk(size_t n_vertices, size_t dest_index, const F3DVtx* vertices) {
+    if (mRsp->geometry_mode & G_LIGHTING_POSITIONAL) {
+        return false;
+    }
+#ifdef XSDK_FAST3D_VMX_VERIFY
+    // The scalar code first, as the reference, then the VMX, whose vertices are kept.
+    if (sVerifyScalar) {
+        return false;
+    }
+    sVerifyScalar = true;
+    GfxSpVertex(n_vertices, dest_index, vertices);
+    sVerifyScalar = false;
+    constexpr size_t capacity = MAX_VERTICES + 4;
+    LoadedVertex scalar[capacity];
+    const size_t count =
+        vertices == nullptr || dest_index >= capacity ? 0 : std::min(n_vertices, capacity - dest_index);
+    if (count != 0) {
+        memcpy(scalar, &mRsp->loaded_vertices[dest_index], count * sizeof(LoadedVertex));
+    }
+    GfxSpVertexVmx(n_vertices, dest_index, vertices);
+
+    float largest = 0.0f;
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 4; c++) {
+            largest = std::max(largest, fabsf(mRsp->MP_matrix[r][c]));
+        }
+    }
+    for (size_t i = 0; i < count; i++) {
+        const F3DVtx_t& v = vertices[i].v;
+        const LoadedVertex& s = scalar[i];
+        const LoadedVertex& m = mRsp->loaded_vertices[dest_index + i];
+        // Some ulps of the largest term the transform adds.
+        const float tolerance = 1e-5f * largest * (1.0f + abs(v.ob[0]) + abs(v.ob[1]) + abs(v.ob[2]));
+        sVerified++;
+        if (VerifyMatches(s, m, tolerance)) {
+            continue;
+        }
+        sMismatched++;
+        if (!sVerifyLogged) {
+            sVerifyLogged = true;
+            xsdk_log_write("Fast3D VMX check: the first vertex beyond rounding: geometry mode 0x%08X, %u lights, ob %d "
+                           "%d %d, tc %d %d, cn %u %u %u %u; scalar %.9g %.9g %.9g %.9g, uv %.9g %.9g, rgba %u %u %u "
+                           "%u, clip 0x%02X; VMX %.9g %.9g %.9g %.9g, uv %.9g %.9g, rgba %u %u %u %u, clip 0x%02X",
+                           (unsigned)mRsp->geometry_mode, (unsigned)mRsp->current_num_lights, v.ob[0], v.ob[1], v.ob[2],
+                           v.tc[0], v.tc[1], v.cn[0], v.cn[1], v.cn[2], v.cn[3], s.x, s.y, s.z, s.w, s.u, s.v,
+                           s.color.r, s.color.g, s.color.b, s.color.a, s.clip_rej, m.x, m.y, m.z, m.w, m.u, m.v,
+                           m.color.r, m.color.g, m.color.b, m.color.a, m.clip_rej);
+        }
+    }
+    const uint32_t now = VerifyTicks();
+    if (sVerifyStart == 0) {
+        sVerifyStart = now;
+    } else if (now - sVerifyStart >= kVerifyWindowTicks) {
+        xsdk_log_write("Fast3D VMX check: %u vertices in 10 s, %u beyond rounding", (unsigned)sVerified,
+                       (unsigned)sMismatched);
+        sVerified = 0;
+        sMismatched = 0;
+        sVerifyStart = now;
+    }
+    return true;
+#else
+    GfxSpVertexVmx(n_vertices, dest_index, vertices);
+    return true;
+#endif
+}
+
+// GfxSpVertex's steps in its order, with the transform, the lights' and texgen's dot products and their int and float
+// conversions in VMX, which the FPU takes through memory; floats differ only where a multiply-add is fused.
+void Interpreter::GfxSpVertexVmx(size_t n_vertices, size_t dest_index, const F3DVtx* vertices) {
+    if (n_vertices == 0 || vertices == nullptr) {
+        return;
+    }
+    const bool lighting = mRsp->geometry_mode & G_LIGHTING;
+    const bool texgen = lighting && (mRsp->geometry_mode & G_TEXTURE_GEN);
+    if (lighting && mRsp->lights_changed) {
+        for (int i = 0; i < mRsp->current_num_lights - 1; i++) {
+            CalculateNormalDir(&mRsp->current_lights[i].l, mRsp->current_lights_coeffs[i]);
+        }
+        CalculateNormalDir(&mRsp->lookat[0], mRsp->current_lookat_coeffs[0]);
+        CalculateNormalDir(&mRsp->lookat[1], mRsp->current_lookat_coeffs[1]);
+        mRsp->lights_changed = false;
+    }
+
+    // Each light's direction, a lane of four lights a vector, and its colour, as floats; the ambient light as ints.
+    const int lights = mRsp->current_num_lights - 1;
+    alignas(16) float directions[3][MAX_LIGHTS] = {};
+    alignas(16) float colours[MAX_LIGHTS][4];
+    alignas(16) int32_t ambient[4] = {};
+    if (lighting) {
+        for (int i = 0; i < lights; i++) {
+            for (int c = 0; c < 3; c++) {
+                directions[c][i] = mRsp->current_lights_coeffs[i][c];
+                colours[i][c] = mRsp->current_lights[i].l.col[c];
+            }
+            colours[i][3] = 0.0f;
+        }
+        for (int c = 0; c < 3; c++) {
+            ambient[c] = mRsp->current_lights[lights].l.col[c];
+        }
+    }
+    const float (*look)[3] = mRsp->current_lookat_coeffs;
+    const VFloat look_x = { look[0][0], look[1][0], 0.0f, 0.0f };
+    const VFloat look_y = { look[0][1], look[1][1], 0.0f, 0.0f };
+    const VFloat look_z = { look[0][2], look[1][2], 0.0f, 0.0f };
+    const VFloat tex_scale = { (float)mRsp->texture_scaling_factor.s, (float)mRsp->texture_scaling_factor.t, 0.0f,
+                               0.0f };
+    const VFloat row0 = vec_ld(0, mRsp->MP_matrix[0]);
+    const VFloat row1 = vec_ld(0, mRsp->MP_matrix[1]);
+    const VFloat row2 = vec_ld(0, mRsp->MP_matrix[2]);
+    const VFloat row3 = vec_ld(0, mRsp->MP_matrix[3]);
+    const float fog_mul = mRsp->fog_mul;
+    const float fog_offset = mRsp->fog_offset;
+
+    for (size_t i = 0; i < n_vertices; i++, dest_index++) {
+        const F3DVtx_t* v = &vertices[i].v;
+        struct LoadedVertex* d = &mRsp->loaded_vertices[dest_index];
+        const VByte raw = LoadUnaligned(&vertices[i]);
+
+        // x, y, z and w: ob by MP_matrix's rows, added in the scalar code's order.
+        const VFloat ob = vec_ctf(vec_unpackh((__vector signed short)raw), 0);
+        VFloat position = vec_madd(Splat<0>(ob), row0, kNegativeZero);
+        position = vec_madd(Splat<1>(ob), row1, position);
+        position = vec_madd(Splat<2>(ob), row2, position);
+        vec_st(vec_add(position, row3), 0, &d->x);
+
+        if (lighting) {
+            // n by each light's direction, a light a lane, then r, g and b added to as ints a light at a time.
+            const VFloat normal = vec_ctf(vec_unpackl(vec_unpackl((__vector signed char)raw)), 0);
+            const VFloat nx = Splat<0>(normal);
+            const VFloat ny = Splat<1>(normal);
+            const VFloat nz = Splat<2>(normal);
+            VInt rgb = vec_ld(0, ambient);
+            for (int first = 0; first < lights; first += 4) {
+                VFloat intensities = vec_madd(nx, vec_ld(0, &directions[0][first]), kNegativeZero);
+                intensities = vec_madd(ny, vec_ld(0, &directions[1][first]), intensities);
+                intensities = Divide127(vec_madd(nz, vec_ld(0, &directions[2][first]), intensities));
+                for (int l = first; l < lights && l < first + 4; l++) {
+                    const VFloat intensity = Splat<0>(intensities);
+                    const VInt lit = vec_cts(vec_madd(intensity, vec_ld(0, colours[l]), vec_ctf(rgb, 0)), 0);
+                    rgb = vec_sel(rgb, lit, vec_cmpgt(intensity, kZero));
+                    intensities = vec_sld(intensities, intensities, 4);
+                }
+            }
+            // At most 255, as bytes repeating every 4, so each byte store takes its own.
+            const __vector unsigned short rgb16 = vec_packsu(rgb, rgb);
+            const VByte rgb8 = vec_packsu(rgb16, rgb16);
+            vec_ste(rgb8, 0, &d->color.r);
+            vec_ste(rgb8, 0, &d->color.g);
+            vec_ste(rgb8, 0, &d->color.b);
+
+            if (texgen) {
+                // dotx and doty as lanes 0 and 1, then U and V from them, as shorts.
+                VFloat dots = vec_madd(nx, look_x, kNegativeZero);
+                dots = vec_madd(ny, look_y, dots);
+                dots = Clamp(Divide127(vec_madd(nz, look_z, dots)), kMinusOne, kOne);
+                if (mRsp->geometry_mode & G_TEXTURE_GEN_LINEAR) {
+                    alignas(16) float linear[4];
+                    vec_st(dots, 0, linear);
+                    linear[0] = acosf(-linear[0]) /* M_PI */ * 0.159155f;
+                    linear[1] = acosf(-linear[1]) /* M_PI */ * 0.159155f;
+                    dots = vec_ld(0, linear);
+                } else {
+                    // (dot + 1) / 4, exact as a power of two.
+                    dots = vec_madd(vec_add(dots, kOne), kQuarter, kNegativeZero);
+                }
+                const VInt uv = vec_cts(vec_madd(dots, tex_scale, kNegativeZero), 0);
+                const VFloat uv_float = vec_ctf(vec_unpackh(vec_pack(uv, uv)), 0);
+                vec_ste(uv_float, 0, &d->u);
+                vec_ste(uv_float, 0, &d->v);
+            }
+        } else {
+            d->color.r = v->cn[0];
+            d->color.g = v->cn[1];
+            d->color.b = v->cn[2];
+        }
+
+        if (!texgen) {
+            short U = v->tc[0] * mRsp->texture_scaling_factor.s >> 16;
+            short V = v->tc[1] * mRsp->texture_scaling_factor.t >> 16;
+            d->u = U;
+            d->v = V;
+        }
+
+        // trivial clip rejection, of what the transform stored
+        const float x = AdjXForAspectRatio(d->x);
+        const float y = d->y;
+        const float z = d->z;
+        float w = d->w;
+        d->clip_rej = 0;
+        if (x < -w) {
+            d->clip_rej |= 1; // CLIP_LEFT
+        }
+        if (x > w) {
+            d->clip_rej |= 2; // CLIP_RIGHT
+        }
+        if (y < -w) {
+            d->clip_rej |= 4; // CLIP_BOTTOM
+        }
+        if (y > w) {
+            d->clip_rej |= 8; // CLIP_TOP
+        }
+        if (z > w) {
+            d->clip_rej |= 32; // CLIP_FAR
+        }
+        d->x = x;
+
+        if (mRsp->geometry_mode & G_FOG) {
+            if (fabsf(w) < 0.001f) {
+                // To avoid division by zero
+                w = 0.001f;
+            }
+
+            float winv = 1.0f / w;
+            if (winv < 0.0f) {
+                winv = std::numeric_limits<int16_t>::max();
+            }
+
+            float fog_z = z * winv * fog_mul + fog_offset;
+            fog_z = Ship::Math::clamp(fog_z, 0.0f, 255.0f);
+            d->color.a = fog_z; // Use alpha variable to store fog factor
+        } else {
+            d->color.a = v->cn[3];
+        }
+    }
+}
+#endif
+
 void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx* vertices) {
+#ifdef __XSDK__
+    if (GfxSpVertexXsdk(n_vertices, dest_index, vertices)) {
+        return;
+    }
+#endif
     for (size_t i = 0; i < n_vertices; i++, dest_index++) {
         const F3DVtx_t* v = &vertices[i].v;
         const F3DVtx_tn* vn = &vertices[i].n;
