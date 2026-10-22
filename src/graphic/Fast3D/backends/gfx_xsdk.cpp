@@ -422,10 +422,12 @@ static uint32_t AddressMode(uint32_t cm) {
 void GfxRenderingAPIXsdk::SetSamplerParameters(int sampler, bool linear_filter, uint32_t cms, uint32_t cmt) {
     Timed timed(mCounts);
     const uint32_t id = mCurrentTextureIds[sampler];
-    if (!DRAWS || id == 0 || id >= mTextures.size()) {
-        return;
+    if (DRAWS && id != 0 && id < mTextures.size()) {
+        SetSampler(mTextures[id], linear_filter, cms, cmt);
     }
-    Texture& texture = mTextures[id];
+}
+
+void GfxRenderingAPIXsdk::SetSampler(Texture& texture, bool linear_filter, uint32_t cms, uint32_t cmt) {
     // Three-point filtering takes the place of the linear filter (gfx_opengl.cpp:564-567).
     const uint32_t filter = linear_filter && mFilter == FILTER_LINEAR ? XSDK_FILTER_LINEAR : XSDK_FILTER_POINT;
     XsdkSampler setting = {};
@@ -834,6 +836,8 @@ int GfxRenderingAPIXsdk::CreateFramebuffer() {
     mFramebuffers.push_back({});
     mFramebuffers.back().texture = (uint32_t)mTextures.size();
     mTextures.emplace_back();
+    // As the D3D11 backend samples its framebuffers (gfx_direct3d11.cpp:739-743).
+    SetSampler(mTextures.back(), true, G_TX_WRAP, G_TX_WRAP);
     return (int)mFramebuffers.size() - 1;
 }
 

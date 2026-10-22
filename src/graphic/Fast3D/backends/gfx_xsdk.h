@@ -190,6 +190,7 @@ class GfxRenderingAPIXsdk final : public GfxRenderingAPI {
     void FreeNow(Memory& memory);
     void ReleasePassed();
     bool ReplaceTexels(Texture& texture, uint32_t width, uint32_t height, bool framebuffer);
+    void SetSampler(Texture& texture, bool linear_filter, uint32_t cms, uint32_t cmt);
     const Texture& TextureFor(uint32_t id) const;
     void LoadProgram(ShaderProgram& prg, const ::CCFeatures& features, uint64_t id0, uint32_t id1);
     bool FinishProgram(ShaderProgram& prg, const std::string& name, const std::string& vertexGlsl,
