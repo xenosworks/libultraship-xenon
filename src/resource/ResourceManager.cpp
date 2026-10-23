@@ -8,10 +8,6 @@
 #include "utils/Utils.h"
 #include "public/bridge/consolevariablebridge.h"
 #include "Context.h"
-#ifdef __XSDK__
-#include "xsdk/log.h"
-#include "xsdk/thread.h"
-#endif
 
 namespace Ship {
 
@@ -57,21 +53,7 @@ void ResourceManager::Init(const std::vector<std::string>& archivePaths,
 
     // the extra `- 1` is because we reserve an extra thread for spdlog
     size_t threadCount = std::max(1, (int32_t)(std::thread::hardware_concurrency() - reservedThreadCount - 1));
-#ifdef __XSDK__
-    // On hardware threads 3 and 4, off the main thread's core (0 and 1); xsdk starts a thread on its creator's.
-    mThreadPool = std::make_shared<BS::thread_pool>(threadCount, [] {
-        const uint32_t hardwareThread = 3 + (uint32_t)*BS::this_thread::get_index() % 2;
-        const NTSTATUS status = xsdk_thread_move(hardwareThread);
-        if (!NT_SUCCESS(status)) {
-            xsdk_log_write("ResourceManager: xsdk_thread_move(%u) failed: 0x%08X", (unsigned)hardwareThread,
-                           (unsigned)status);
-            return;
-        }
-        xsdk_log_write("ResourceManager: a pool thread on hardware thread %u", (unsigned)xsdk_thread_hardware_thread());
-    });
-#else
     mThreadPool = std::make_shared<BS::thread_pool>(threadCount);
-#endif
 
     if (!IsLoaded()) {
         // Nothing ever unpauses the thread pool since nothing will ever try to load the archive again.

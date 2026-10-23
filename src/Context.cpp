@@ -11,11 +11,6 @@
 #include "debug/CrashHandler.h"
 #include "window/FileDropMgr.h"
 
-#ifdef __XSDK__
-#include "xsdk/log.h"
-#include "xsdk/thread.h"
-#endif
-
 #ifdef _WIN32
 #include <libloaderapi.h>
 #include <tchar.h>
@@ -106,19 +101,7 @@ bool Context::InitLogging() {
 
     try {
         // Setup Logging
-#ifdef __XSDK__
-        // spdlog's thread on hardware thread 5, off the main thread's core (0 and 1).
-        spdlog::init_thread_pool(8192, 1, [] {
-            const NTSTATUS status = xsdk_thread_move(5);
-            if (!NT_SUCCESS(status)) {
-                xsdk_log_write("Context: xsdk_thread_move(5) for spdlog failed: 0x%08X", (unsigned)status);
-                return;
-            }
-            xsdk_log_write("Context: spdlog's thread on hardware thread %u", (unsigned)xsdk_thread_hardware_thread());
-        });
-#else
         spdlog::init_thread_pool(8192, 1);
-#endif
         std::vector<spdlog::sink_ptr> sinks;
 
 #if (!defined(_WIN32)) || defined(_DEBUG)
