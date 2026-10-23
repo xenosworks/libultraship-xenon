@@ -10,6 +10,7 @@
 #include "Context.h"
 #include "gfx_xsdk.h"
 #include "imgui_impl_xsdk.h"
+#include "public/bridge/consolevariablebridge.h"
 #include "window/Window.h"
 #include "xsdk/gpu.h"
 #include "xsdk/log.h"
@@ -105,6 +106,9 @@ void GfxWindowBackendXsdk::Init(const char* gameName, const char* apiName, bool 
     }
     mFrameDueNs = NowNs();
     mCaptures = ReadCaptures();
+    // The console's only input is its controllers: Back opens the menu (Gui.cpp, TOGGLE_PAD_BTN) and they move
+    // through it, unless the player turned that off.
+    CVarRegisterInteger(CVAR_IMGUI_CONTROLLER_NAV, 1);
     Ship::Context::GetInstance()->GetWindow()->GetGui()->Init(Ship::GuiWindowInitData{});
 }
 
