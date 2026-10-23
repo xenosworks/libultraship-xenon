@@ -3345,9 +3345,18 @@ bool gfx_vtx_hash_handler_custom(F3DGfx** cmd0) {
     (*cmd0)++;
     const uint64_t hash = ((uint64_t)(*cmd0)->words.w0 << 32) + (*cmd0)->words.w1;
 
+#ifdef __XSDK__
+    // A cached pointer is marked by bit 0 of w0, which the command leaves clear (starship:tools/Torch/src/n64/
+    // gbi-otr.h:132-133). Its size can't tell: xsdk's heap starts at 0x70000 (xsdk:results/2026-10-20-milestone-49/
+    // dusklight.log), so a pointer below 1 MB passed for an offset and was added to the resource's address again until
+    // it passed 1 MB, and the vertices came from whatever lay there (xsdk:docs/HARDWARE.md, "Cached vertex pointers
+    // below 1 MB, milestone 61").
+    if ((*cmd0)[-1].words.w0 & 1) {
+#else
     // We need to know if the offset is a cached pointer or not. An offset greater than one million is not a
     // real offset, so it must be a real pointer
     if (offset > 0xFFFFF) {
+#endif
         (*cmd0)--;
         F3DGfx* cmd = *cmd0;
         gfx->GfxSpVertex(C0(12, 8), C0(1, 7) - C0(12, 8), (F3DVtx*)offset);
@@ -3363,6 +3372,9 @@ bool gfx_vtx_hash_handler_custom(F3DGfx** cmd0) {
 
             // TODO: WTF??
             cmd->words.w1 = (uintptr_t)vtx;
+#ifdef __XSDK__
+            cmd->words.w0 |= 1;
+#endif
 
             gfx->GfxSpVertex(C0(12, 8), C0(1, 7) - C0(12, 8), vtx);
             (*cmd0)++;
