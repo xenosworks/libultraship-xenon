@@ -140,6 +140,10 @@ void Interpreter::Flush() {
 ShaderProgram* Interpreter::LookupOrCreateShaderProgram(uint64_t id0, uint64_t id1) {
     ShaderProgram* prg = mRapi->LookupShader(id0, id1);
     if (prg == nullptr) {
+#ifdef __XSDK__
+        // gfx_xsdk makes the new program its own at once, so the batch so far is drawn with its own program first.
+        Flush();
+#endif
         mRapi->UnloadShader(mRenderingState.mShaderProgram);
         prg = mRapi->CreateAndLoadNewShader(id0, id1);
         mRenderingState.mShaderProgram = prg;
