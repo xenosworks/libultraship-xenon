@@ -35,6 +35,8 @@ static constexpr uint32_t FENCE_TIMEOUT_MS = 5000;
 static constexpr uint32_t RING_SEGMENTS = 8;
 static constexpr uint32_t SEGMENT_BYTES = 512 * 1024;
 static constexpr uint32_t RING_BYTES = RING_SEGMENTS * SEGMENT_BYTES;
+// Each draw's vertices start on a page of their own, the unit xsdk invalidates (xsdk:src/gpu_setup.c:171-176).
+static constexpr uint32_t DRAW_BYTES_ALIGN = 4096;
 static constexpr uint32_t CLOCK_SLOTS = 4;
 static constexpr uint32_t CLOCK_SLOT_BYTES = 32;
 // Textures share 1 MB blocks in 4 KB pages, the alignment xsdk_texture_attach takes (xsdk:include/xsdk/texture.h).
@@ -219,6 +221,8 @@ bool GfxRenderingAPIXsdk::ReplaceTexels(Texture& texture, uint32_t width, uint32
     FreeAfterFrame(texture.memory);
     xsdk_texture_attach(&layout, memory.texels);
     texture.texture = layout;
+    texture.size[0] = (float)width;
+    texture.size[1] = (float)height;
     texture.memory = memory;
     texture.generation++;
     return true;
@@ -581,17 +585,17 @@ void GfxRenderingAPIXsdk::ApplyBlock(const ShaderProgram& prg) {
     for (uint32_t i = 0; i < 2; i++) {
         if (prg.fetchSlots[i] >= 0) {
             const Texture& texture = TextureFor(mCurrentTextureIds[i]);
-            block[i * 4 + 0] = (float)texture.texture.width;
-            block[i * 4 + 1] = (float)texture.texture.height;
+            block[i * 4 + 0] = texture.size[0];
+            block[i * 4 + 1] = texture.size[1];
             block[8 + i] = texture.threePoint ? 1.0f : 0.0f;
         }
         if (prg.fetchSlots[SHADER_FIRST_MASK_TEXTURE + i] >= 0) {
             const Texture& mask = TextureFor(mCurrentTextureIds[SHADER_FIRST_MASK_TEXTURE + i]);
-            block[i * 4 + 2] = (float)mask.texture.width;
-            block[i * 4 + 3] = (float)mask.texture.height;
+            block[i * 4 + 2] = mask.size[0];
+            block[i * 4 + 3] = mask.size[1];
         }
     }
-    block[10] = (float)mFrameCount;
+    block[10] = mFrameCountFloat;
     block[11] = mNoiseScale;
     if (mBlockValid && prg.block == mBlockRegister && memcmp(block, mBlock, sizeof(block)) == 0) {
         return;
@@ -609,17 +613,26 @@ void GfxRenderingAPIXsdk::NextSegment() {
     WaitFence(mRingFences[mRingSegment], "the vertex ring's next segment");
 }
 
-// xsdk's memcpy keeps to the stores write-combined memory takes (xsdk:docs/PITFALLS.md, "Plain stores to GPU memory");
-// each draw's vertices start on 16 bytes.
+// xsdk's memcpy keeps to the stores write-combined memory takes (xsdk:docs/PITFALLS.md, "Plain stores to GPU memory").
+// The GPU's caches drop a segment once, as it's first written, not every draw (xsdk:docs/PITFALLS.md, "Writes the GPU
+// doesn't see"): NextSegment waited for the fence after the segment's last use, so no draw still reads it
+// (xsdk:src/gpu.c:519-534); the invalidate goes into the stream before this use's first draw, and the GPU waits for it
+// to finish (xsdk:src/gpu_setup.c:171-186); and each later draw reads only what this function copied before it was
+// queued, which the kick syncs before the GPU sees it (xsdk:src/gpu.c:215-221), in pages no earlier draw read. On the
+// console 20 frames drew pixel for pixel as an invalidate every draw does (xsdk:docs/HARDWARE.md, "Vertices written
+// after an invalidate, milestone 61").
 uint32_t GfxRenderingAPIXsdk::WriteVertices(const float* floats, uint32_t bytes) {
     if (mRingOffset + bytes > SEGMENT_BYTES) {
         NextSegment();
+    }
+    if (mRingOffset == 0) {
+        xsdk_gpu_invalidate(mRingAddress + mRingSegment * SEGMENT_BYTES, SEGMENT_BYTES);
     }
     const uint32_t offset = mRingSegment * SEGMENT_BYTES + mRingOffset;
     const uint32_t start = Ticks();
     memcpy((void*)((uintptr_t)mRing + offset), floats, bytes);
     mCounts.copyTicks += Ticks() - start;
-    mRingOffset += (bytes + 15) & ~15u;
+    mRingOffset += (bytes + DRAW_BYTES_ALIGN - 1) & ~(DRAW_BYTES_ALIGN - 1);
     return mRingAddress + offset;
 }
 
@@ -650,9 +663,6 @@ void GfxRenderingAPIXsdk::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, siz
     ApplyBlock(*prg);
     const uint32_t bytes = (uint32_t)buf_vbo_len * 4;
     const uint32_t address = WriteVertices(buf_vbo, bytes);
-    // After the CPU writes vertices and before the draws that read them (xsdk:docs/PITFALLS.md, "Writes the GPU
-    // doesn't see").
-    xsdk_gpu_invalidate(address, bytes);
     xsdk_gpu_set_vertices(0, address, bytes);
     xsdk_gpu_draw(XSDK_PRIMITIVE_TRIANGLE_LIST, (uint32_t)buf_vbo_num_tris * 3);
     mFramebuffers[mCurrentFb].drawn = true;
@@ -779,6 +789,7 @@ void GfxRenderingAPIXsdk::StartFrame() {
     Timed timed(mCounts);
     mFrameStart = timed.start;
     mFrameCount++;
+    mFrameCountFloat = (float)mFrameCount;
     if (!DRAWS || mRing == nullptr) {
         return;
     }
@@ -967,7 +978,6 @@ void GfxRenderingAPIXsdk::ClearFramebuffer(bool color, bool depth) {
     xsdk_gpu_set_raster(&mRasterPlain);
     ApplyProgram(mClearProgram);
     const uint32_t address = WriteVertices(corners, sizeof(corners));
-    xsdk_gpu_invalidate(address, sizeof(corners));
     xsdk_gpu_set_vertices(0, address, sizeof(corners));
     xsdk_gpu_draw(XSDK_PRIMITIVE_TRIANGLE_LIST, 3);
     mDirty |= DIRTY_TARGET;

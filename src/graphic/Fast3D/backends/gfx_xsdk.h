@@ -152,6 +152,8 @@ class GfxRenderingAPIXsdk final : public GfxRenderingAPI {
         // Raised whenever its fetch constant changes, so draws set it again.
         uint32_t generation;
         bool threePoint;
+        // Its width and height for the block, as floats once, where a draw's conversion goes through memory.
+        float size[2];
     };
     struct Framebuffer {
         uint32_t width;
@@ -228,6 +230,7 @@ class GfxRenderingAPIXsdk final : public GfxRenderingAPI {
     uint32_t mWindowStart = 0;
     uint32_t mFrameStart = 0;
     uint32_t mFrameCount = 0;
+    float mFrameCountFloat = 0.0f;
     int mLastFramebuffer = 0;
     FilteringMode mFilter = FILTER_THREE_POINT;
 
