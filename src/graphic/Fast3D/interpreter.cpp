@@ -39,9 +39,8 @@
 
 #ifdef __XSDK__
 #include <altivec.h>
-#ifdef XSDK_FAST3D_VMX_VERIFY
+#include "xsdk/gpu.h"
 #include "xsdk/log.h"
-#endif
 #endif
 
 std::stack<std::string> currentDir;
@@ -4599,9 +4598,36 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 #endif
 }
 
+#ifdef __XSDK__
+// gfx_xsdk draws the game's framebuffer with its colour and depth in eDRAM at once, and skips a framebuffer past that
+// (backends/gfx_xsdk.cpp, UpdateFramebufferParameters), which an internal resolution above about 117% of 720p asks for.
+// shortcut: such a framebuffer is drawn at the largest size of its shape that fits; tiled passes would draw it whole
+// (xsdk:docs/scope/61-fast3d.md, Left out), once a game holds its frame rate at 720p.
+static void FitInEdram(uint32_t& width, uint32_t& height) {
+    static bool logged;
+    if (2 * xsdk_gpu_target_tiles(width, height) <= XSDK_EDRAM_TILES) {
+        return;
+    }
+    const uint32_t askedWidth = width, askedHeight = height;
+    // A tile is 16 rows high.
+    while (height > 16 && 2 * xsdk_gpu_target_tiles(width, height) > XSDK_EDRAM_TILES) {
+        height -= 16;
+        width = (uint32_t)((uint64_t)askedWidth * height / askedHeight);
+    }
+    if (!logged) {
+        xsdk_log_write("fast3d: the game's %ux%u framebuffer is drawn at %ux%u, what eDRAM holds at once (logged once)",
+                       (unsigned)askedWidth, (unsigned)askedHeight, (unsigned)width, (unsigned)height);
+        logged = true;
+    }
+}
+#endif
+
 void Interpreter::StartFrame() {
     mWapi->GetDimensions(&mGfxCurrentWindowDimensions.width, &mGfxCurrentWindowDimensions.height, &mCurWindowPosX,
                          &mCurWindowPosY);
+#ifdef __XSDK__
+    FitInEdram(mCurDimensions.width, mCurDimensions.height);
+#endif
     if (mCurDimensions.height == 0) {
         // Avoid division by zero
         mCurDimensions.height = 1;
