@@ -119,17 +119,21 @@ class GfxRenderingAPIXsdk final : public GfxRenderingAPI {
         uint32_t framebufferCalls;
         uint64_t backendTicks;
         uint64_t copyTicks;
+        // DrawTriangles' own, its copy included, and UploadTexture's, each part of backendTicks.
+        uint64_t drawTicks;
+        uint64_t uploadTicks;
         uint64_t frameTicks;
         // The GPU's clock, 498.75 a microsecond, from when the command processor reached each timed frame to when the
         // GPU went idle after it.
         uint64_t gpuTicks;
         uint32_t gpuFrames;
     };
-    // Adds the CPU time from its making to its end to the window's.
+    // Adds the CPU time from its making to its end to the window's, and to part's if one is named.
     struct Timed {
-        explicit Timed(Counts& counts);
+        explicit Timed(Counts& counts, uint64_t* part = nullptr);
         ~Timed();
         Counts& counts;
+        uint64_t* part;
         uint32_t start;
     };
     // Where a texture's texels sit: 4 KB pages of a shared block, or an allocation of its own.

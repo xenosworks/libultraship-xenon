@@ -65,11 +65,15 @@ static double Milliseconds(uint64_t ticks, uint32_t count) {
     return count == 0 ? 0.0 : ticks * 1000.0 / TICKS_PER_SECOND / count;
 }
 
-GfxRenderingAPIXsdk::Timed::Timed(Counts& counts) : counts(counts), start(Ticks()) {
+GfxRenderingAPIXsdk::Timed::Timed(Counts& counts, uint64_t* part) : counts(counts), part(part), start(Ticks()) {
 }
 
 GfxRenderingAPIXsdk::Timed::~Timed() {
-    counts.backendTicks += Ticks() - start;
+    const uint32_t ticks = Ticks() - start;
+    counts.backendTicks += ticks;
+    if (part != nullptr) {
+        *part += ticks;
+    }
 }
 
 GfxRenderingAPIXsdk::GfxRenderingAPIXsdk(GfxWindowBackendXsdk* window) : mWindow(window) {
@@ -84,14 +88,17 @@ void GfxRenderingAPIXsdk::LogWindow(uint32_t now) {
     const Counts& c = mCounts;
     const double seconds = (double)(now - mWindowStart) / TICKS_PER_SECOND;
     const uint32_t frames = c.frames == 0 ? 1 : c.frames;
-    xsdk_log_write("gfx_xsdk: %u frames in %.1f s (%.1f fps); a frame: %.1f draws (%.1f skipped), %.0f triangles, %.0f "
-                   "floats, %.3f ms in the backend (%.3f copying vertices), %.3f ms from StartFrame to EndFrame, "
-                   "%.3f ms of GPU time over %u frames",
-                   (unsigned)c.frames, seconds, c.frames / seconds, (double)c.draws / frames,
-                   (double)c.skippedDraws / frames, (double)c.triangles / frames, (double)c.floats / frames,
-                   Milliseconds(c.backendTicks, frames), Milliseconds(c.copyTicks, frames),
-                   Milliseconds(c.frameTicks, frames),
-                   c.gpuFrames == 0 ? 0.0 : c.gpuTicks / GPU_TICKS_PER_MS / c.gpuFrames, (unsigned)c.gpuFrames);
+    xsdk_log_write(
+        "gfx_xsdk: %u frames in %.1f s (%.1f fps); a frame: %.1f draws (%.1f skipped), %.0f triangles, %.0f "
+        "floats, %.3f ms in the backend (%.3f drawing, %.3f of it copying vertices; %.3f uploading textures), "
+        "%.3f ms from StartFrame to EndFrame, %.3f ms of GPU time over %u frames; a draw %.3f us less its copy",
+        (unsigned)c.frames, seconds, c.frames / seconds, (double)c.draws / frames, (double)c.skippedDraws / frames,
+        (double)c.triangles / frames, (double)c.floats / frames, Milliseconds(c.backendTicks, frames),
+        Milliseconds(c.drawTicks, frames), Milliseconds(c.copyTicks, frames), Milliseconds(c.uploadTicks, frames),
+        Milliseconds(c.frameTicks, frames), c.gpuFrames == 0 ? 0.0 : c.gpuTicks / GPU_TICKS_PER_MS / c.gpuFrames,
+        (unsigned)c.gpuFrames,
+        // A clear's copy is counted but isn't a draw's, so this is a little under the truth.
+        Milliseconds(c.drawTicks > c.copyTicks ? c.drawTicks - c.copyTicks : 0, c.draws) * 1000.0);
     xsdk_log_write(
         "gfx_xsdk: in the window: %u shaders created (%u compiled, %u read), %u loaded, %u kept; %u textures "
         "created, %u uploads of %llu KB; %u framebuffer calls",
@@ -387,7 +394,7 @@ void GfxRenderingAPIXsdk::SelectTexture(int tile, uint32_t textureId) {
 }
 
 void GfxRenderingAPIXsdk::UploadTexture(const uint8_t* rgba32Buf, uint32_t width, uint32_t height) {
-    Timed timed(mCounts);
+    Timed timed(mCounts, &mCounts.uploadTicks);
     mCounts.uploads++;
     mCounts.uploadBytes += (uint64_t)width * height * 4;
     const uint32_t id = mCurrentTextureIds[mCurrentTile];
@@ -615,7 +622,7 @@ uint32_t GfxRenderingAPIXsdk::WriteVertices(const float* floats, uint32_t bytes)
 }
 
 void GfxRenderingAPIXsdk::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
-    Timed timed(mCounts);
+    Timed timed(mCounts, &mCounts.drawTicks);
     mCounts.draws++;
     mCounts.triangles += buf_vbo_num_tris;
     mCounts.floats += buf_vbo_len;
@@ -859,7 +866,11 @@ void GfxRenderingAPIXsdk::UpdateFramebufferParameters(int fb_id, uint32_t width,
     fb.height = height;
     fb.fits = 2 * xsdk_gpu_target_tiles(width, height) <= XSDK_EDRAM_TILES;
     if (!fb.fits) {
-        LogOnce(mLoggedTooBig, "a framebuffer past eDRAM's tiles isn't drawn");
+        char what[96];
+        snprintf(what, sizeof(what), "framebuffer %d, %ux%u, needs %u of eDRAM's %u tiles and isn't drawn", fb_id,
+                 (unsigned)width, (unsigned)height, 2 * (unsigned)xsdk_gpu_target_tiles(width, height),
+                 (unsigned)XSDK_EDRAM_TILES);
+        LogOnce(mLoggedTooBig, what);
     }
     if (DRAWS && fb_id != 0 && fb.fits) {
         fb.fits = ReplaceTexels(mTextures[fb.texture], width, height, true);
