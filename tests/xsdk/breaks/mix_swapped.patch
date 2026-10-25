@@ -1,0 +1,16 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
+@@ -387,10 +387,11 @@
+         out += " * ";
+         out += ShaderItemToStr(Item(c, only_alpha, 2), with_alpha, only_alpha, opt_alpha, first_cycle, true);
+     } else if (do_mix) {
++        // Broken on purpose: a and b swapped.
+         out += "mix(";
++        out += ShaderItemToStr(Item(c, only_alpha, 0), with_alpha, only_alpha, opt_alpha, first_cycle, false);
++        out += ", ";
+         out += ShaderItemToStr(Item(c, only_alpha, 1), with_alpha, only_alpha, opt_alpha, first_cycle, false);
+-        out += ", ";
+-        out += ShaderItemToStr(Item(c, only_alpha, 0), with_alpha, only_alpha, opt_alpha, first_cycle, false);
+         out += ", ";
+         out += ShaderItemToStr(Item(c, only_alpha, 2), with_alpha, only_alpha, opt_alpha, first_cycle, true);
+         out += ")";

@@ -1,0 +1,12 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk.cpp
+@@ -152,7 +152,8 @@
+                 for (uint32_t p = first; p <= page; p++) {
+                     block.used[p] = true;
+                 }
+-                volatile uint32_t* const texels = block.memory + first * PAGE_BYTES / 4;
++                // Broken on purpose: every texture at the block's first page.
++                volatile uint32_t* const texels = block.memory;
+                 return { texels, (int32_t)b, first, pages };
+             }
+         }

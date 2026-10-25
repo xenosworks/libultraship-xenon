@@ -77,7 +77,9 @@ GfxRenderingAPIXsdk::Timed::~Timed() {
 }
 
 GfxRenderingAPIXsdk::GfxRenderingAPIXsdk(GfxWindowBackendXsdk* window) : mWindow(window) {
-    window->SetRenderer(this);
+    if (window != nullptr) {
+        window->SetRenderer(this);
+    }
     // Texture 0, black, and framebuffer 0, the screen, before anything asks for more.
     mTextures.resize(1);
     mFramebuffers.resize(1);
@@ -815,7 +817,7 @@ void GfxRenderingAPIXsdk::FinishRender() {
     // XAM's drawing under the Guide changes eDRAM between frames (xsdk:include/xsdk/gpu.h, XsdkGpuStats).
     XsdkGpuStats stats;
     xsdk_gpu_stats(&stats);
-    mClearedFb = mWindow->Presented() && stats.system_draws == mSystemDraws ? 0 : -1;
+    mClearedFb = mWindow != nullptr && mWindow->Presented() && stats.system_draws == mSystemDraws ? 0 : -1;
     mSystemDraws = stats.system_draws;
     for (Framebuffer& fb : mFramebuffers) {
         fb.drawn = false;

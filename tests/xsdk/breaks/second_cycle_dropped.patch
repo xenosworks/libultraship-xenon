@@ -1,0 +1,11 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
+@@ -181,7 +181,7 @@
+ @end
+ 
+ @if(o_2cyc)
+-    @{f_range = 2}
++    @{f_range = 1}
+ @else
+     @{f_range = 1}
+ @end

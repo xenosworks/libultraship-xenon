@@ -1,0 +1,17 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
+@@ -432,12 +432,13 @@
+             texLocation[i] = add(texFloats[i]);
+         }
+     }
+-    const int fogLocation = features.opt_fog ? add(4) : 0;
+     const int grayLocation = features.opt_grayscale ? add(4) : 0;
+     const int inputLocation = (int)glsl.attributes.size();
+     for (int i = 0; i < features.numInputs; i++) {
+         add(features.opt_alpha ? 4 : 3);
+     }
++    // Broken on purpose: fog after the inputs.
++    const int fogLocation = features.opt_fog ? add(4) : 0;
+     glsl.vertexFloats = offset;
+     bool noiseItem = false;
+     for (int i = 0; i < 2 * 2 * 4; i++) {

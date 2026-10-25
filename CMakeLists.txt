@@ -65,3 +65,8 @@ endif()
 
 # =========== Sources =============
 add_subdirectory("src")
+
+# gfx_xsdk's checks on the console, built only when asked for (tests/xsdk/CMakeLists.txt).
+if (XSDK AND NOT XSDK_FAST3D_NULL)
+    add_subdirectory("tests/xsdk")
+endif()

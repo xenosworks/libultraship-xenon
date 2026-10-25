@@ -53,6 +53,7 @@ constexpr uint32_t XSDK_CLEAR_ARGB = 0xFF000000;
 // them every 10 s; built with XSDK_FAST3D_NULL it draws nothing, as step 1 measured the CPU alone.
 class GfxRenderingAPIXsdk final : public GfxRenderingAPI {
   public:
+    // window may be null, as in fast3d_check (tests/xsdk), which draws into framebuffers of its own and presents none.
     explicit GfxRenderingAPIXsdk(GfxWindowBackendXsdk* window);
     ~GfxRenderingAPIXsdk() override = default;
     const char* GetName() override;

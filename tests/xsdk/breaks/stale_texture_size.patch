@@ -1,0 +1,12 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk.cpp
+@@ -593,7 +593,8 @@
+     }
+     block[10] = (float)mFrameCount;
+     block[11] = mNoiseScale;
+-    if (mBlockValid && prg.block == mBlockRegister && memcmp(block, mBlock, sizeof(block)) == 0) {
++    // Broken on purpose: the block's values aren't compared.
++    if (mBlockValid && prg.block == mBlockRegister) {
+         return;
+     }
+     xsdk_gpu_set_pixel_constants((uint32_t)prg.block, block, BLOCK_REGISTERS);

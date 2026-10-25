@@ -1,0 +1,12 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk.cpp
+@@ -478,7 +478,8 @@
+ 
+ void GfxRenderingAPIXsdk::SetUseAlpha(bool useAlpha) {
+     Timed timed(mCounts);
+-    mUseAlpha = useAlpha;
++    // Broken on purpose: nothing blends.
++    mUseAlpha = false;
+     mDirty |= DIRTY_BLEND;
+ }
+ 

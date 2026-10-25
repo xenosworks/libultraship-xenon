@@ -1,0 +1,12 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk.cpp
+@@ -1010,7 +1010,8 @@
+     mCounts.framebufferCalls++;
+     if (fbId > 0 && fbId < (int)mFramebuffers.size()) {
+         mCurrentTile = 0;
+-        mCurrentTextureIds[0] = mFramebuffers[fbId].texture;
++        // Broken on purpose: the framebuffer before.
++        mCurrentTextureIds[0] = mFramebuffers[fbId - 1].texture;
+     }
+ }
+ 

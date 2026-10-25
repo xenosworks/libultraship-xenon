@@ -1,0 +1,12 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk_glsl.cpp
+@@ -288,7 +288,8 @@
+             case SHADER_0:
+                 return with_alpha ? "vec4(0.0, 0.0, 0.0, 0.0)" : "vec3(0.0, 0.0, 0.0)";
+             case SHADER_1:
+-                return with_alpha ? "vec4(1.0, 1.0, 1.0, 1.0)" : "vec3(1.0, 1.0, 1.0)";
++                // Broken on purpose: 1 as 0.
++                return with_alpha ? "vec4(0.0, 0.0, 0.0, 0.0)" : "vec3(0.0, 0.0, 0.0)";
+             case SHADER_INPUT_1:
+                 return with_alpha || !inputs_have_alpha ? "vInput1" : "vInput1.rgb";
+             case SHADER_INPUT_2:

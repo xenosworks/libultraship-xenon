@@ -1,0 +1,15 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk.cpp
+@@ -418,9 +418,10 @@
+         case G_TX_NOMIRROR | G_TX_CLAMP:
+             return XSDK_ADDRESS_CLAMP;
+         case G_TX_MIRROR | G_TX_WRAP:
++            // Broken on purpose: mirror and mirror-once swapped.
++            return XSDK_ADDRESS_MIRROR_ONCE;
++        case G_TX_MIRROR | G_TX_CLAMP:
+             return XSDK_ADDRESS_MIRROR;
+-        case G_TX_MIRROR | G_TX_CLAMP:
+-            return XSDK_ADDRESS_MIRROR_ONCE;
+         default:
+             return XSDK_ADDRESS_WRAP;
+     }

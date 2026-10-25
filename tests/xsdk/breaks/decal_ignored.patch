@@ -1,0 +1,12 @@
+--- a/src/graphic/Fast3D/backends/gfx_xsdk.cpp
++++ b/src/graphic/Fast3D/backends/gfx_xsdk.cpp
+@@ -460,7 +460,8 @@
+ 
+ void GfxRenderingAPIXsdk::SetZmodeDecal(bool decal) {
+     Timed timed(mCounts);
+-    mCurrentZmodeDecal = decal;
++    // Broken on purpose: decals drawn as plain draws.
++    mCurrentZmodeDecal = false;
+     mDirty |= DIRTY_DEPTH | DIRTY_RASTER;
+ }
+ 
