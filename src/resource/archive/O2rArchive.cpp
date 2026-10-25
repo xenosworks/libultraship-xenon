@@ -4,7 +4,67 @@
 #include "window/Window.h"
 #include "spdlog/spdlog.h"
 
+#ifdef __XSDK__
+#include <chrono>
+#include <cstdlib>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace Ship {
+#ifdef __XSDK__
+// On the console, each asset a level loads from an archive on the disk stalled the thread that asked for it, drawing or
+// audio, by up to 95 ms; an archive up to this size is read into memory once when opened, and its assets load from
+// there (xsdk:docs/HARDWARE.md, "Starship's assets from memory, milestone 61").
+// shortcut: a bigger one, such as a large texture pack, stays on the disk; read it in parts if one stalls.
+static constexpr off_t kInMemoryBytes = 64 * 1024 * 1024;
+
+// The archive opened from a copy in memory, which libzip frees with the archive; nullptr if it's too big or can't be
+// read, to open it from the disk instead. Read only: nothing in the copy goes back to the disk.
+static zip_t* OpenInMemory(const std::string& path) {
+    const auto start = std::chrono::steady_clock::now();
+    const int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        return nullptr;
+    }
+    struct stat info;
+    char* data = nullptr;
+    size_t read_bytes = 0;
+    if (fstat(fd, &info) == 0 && info.st_size > 0 && info.st_size <= kInMemoryBytes) {
+        data = static_cast<char*>(malloc(info.st_size));
+        while (data != nullptr && read_bytes < static_cast<size_t>(info.st_size)) {
+            const ssize_t n = read(fd, data + read_bytes, info.st_size - read_bytes);
+            if (n <= 0) {
+                break;
+            }
+            read_bytes += n;
+        }
+    }
+    close(fd);
+    if (data == nullptr || read_bytes != static_cast<size_t>(info.st_size)) {
+        free(data);
+        return nullptr;
+    }
+    zip_error_t error;
+    zip_error_init(&error);
+    zip_source_t* source = zip_source_buffer_create(data, read_bytes, 1, &error);
+    zip_t* archive = nullptr;
+    if (source == nullptr) {
+        free(data);
+    } else if ((archive = zip_open_from_source(source, ZIP_RDONLY, &error)) == nullptr) {
+        zip_source_free(source);
+    }
+    zip_error_fini(&error);
+    if (archive != nullptr) {
+        SPDLOG_INFO(
+            "Read {} into memory, {} bytes in {} ms", path, read_bytes,
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    }
+    return archive;
+}
+#endif
+
 O2rArchive::O2rArchive(const std::string& archivePath) : Archive(archivePath) {
 }
 
@@ -67,7 +127,11 @@ std::shared_ptr<File> O2rArchive::LoadFile(const std::string& filePath) {
 }
 
 bool O2rArchive::Open() {
-    mZipArchive = zip_open(GetPath().c_str(), ZIP_CREATE, nullptr);
+#ifdef __XSDK__
+    mZipArchive = OpenInMemory(GetPath());
+    if (mZipArchive == nullptr)
+#endif
+        mZipArchive = zip_open(GetPath().c_str(), ZIP_CREATE, nullptr);
     if (mZipArchive == nullptr) {
         SPDLOG_ERROR("Failed to load zip file \"{}\"", GetPath());
         return false;
