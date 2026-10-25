@@ -113,6 +113,7 @@ class GfxRenderingAPIXsdk final : public GfxRenderingAPI {
         uint32_t shadersCreated;
         uint32_t shadersCompiled;
         uint32_t shadersRead;
+        uint32_t shadersPacked;
         uint32_t shadersLoaded;
         uint32_t texturesCreated;
         uint32_t uploads;

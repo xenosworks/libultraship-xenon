@@ -28,8 +28,10 @@ struct XsdkCompiledProgram {
     std::vector<XsdkLiteral> vertexLiterals;
     std::vector<XsdkLiteral> pixelLiterals;
     XsdkProgramLayout layout;
-    // Read from the disk, not compiled; and the time spent in glslang and in xost, compiled.
+    // Read from the disk or the game's shader pack, not compiled; from the pack; and the time spent in glslang and in
+    // xost, compiled.
     bool read;
+    bool packed;
     double glslangMs;
     double xostMs;
 };
@@ -39,7 +41,8 @@ struct XsdkCompiledProgram {
 // nothing is kept.
 std::string XsdkShaderCacheOpen(const std::string& root, const std::string& templates);
 
-// The program named name, read from the folder, else compiled from its GLSL by glslang and xost and kept there; false
+// The program named name, from the game's shader pack (gfx_xsdk_pack.h) if it holds it for this folder, else read
+// from the folder, else compiled from its GLSL by glslang and xost and kept there; false
 // with why in error where it can't be had, and true with error set where it was had but not kept. Its uniform block,
 // if any, is to take blockRegisters registers.
 bool XsdkShaderProgram(const std::string& folder, const std::string& name, const std::string& vertexGlsl,

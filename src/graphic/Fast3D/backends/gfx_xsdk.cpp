@@ -7,6 +7,7 @@
 
 #include "../interpreter.h"
 #include "gfx_xsdk_glsl.h"
+#include "gfx_xsdk_pack.h"
 #include "gfx_xsdk_window.h"
 #include "public/bridge/consolevariablebridge.h"
 #include "xsdk/log.h"
@@ -104,10 +105,10 @@ void GfxRenderingAPIXsdk::LogWindow(uint32_t now) {
         // A clear's copy is counted but isn't a draw's, so this is a little under the truth.
         Milliseconds(c.drawTicks > c.copyTicks ? c.drawTicks - c.copyTicks : 0, c.draws) * 1000.0);
     xsdk_log_write(
-        "gfx_xsdk: in the window: %u shaders created (%u compiled, %u read), %u loaded, %u kept; %u textures "
-        "created, %u uploads of %llu KB; %u framebuffer calls",
-        (unsigned)c.shadersCreated, (unsigned)c.shadersCompiled, (unsigned)c.shadersRead, (unsigned)c.shadersLoaded,
-        (unsigned)mShaders.size(), (unsigned)c.texturesCreated, (unsigned)c.uploads,
+        "gfx_xsdk: in the window: %u shaders created (%u compiled, %u read, %u of them from the pack), %u loaded, %u "
+        "kept; %u textures created, %u uploads of %llu KB; %u framebuffer calls",
+        (unsigned)c.shadersCreated, (unsigned)c.shadersCompiled, (unsigned)c.shadersRead, (unsigned)c.shadersPacked,
+        (unsigned)c.shadersLoaded, (unsigned)mShaders.size(), (unsigned)c.texturesCreated, (unsigned)c.uploads,
         (unsigned long long)(c.uploadBytes / 1024), (unsigned)c.framebufferCalls);
     mCounts = {};
     mWindowStart = now;
@@ -275,6 +276,7 @@ bool GfxRenderingAPIXsdk::FinishProgram(ShaderProgram& prg, const std::string& n
     }
     if (compiled.read) {
         mCounts.shadersRead++;
+        mCounts.shadersPacked += compiled.packed;
     } else {
         mCounts.shadersCompiled++;
         xsdk_log_write("gfx_xsdk: compiled program %s: glslang %.1f ms, xost %.1f ms", name.c_str(), compiled.glslangMs,
@@ -726,6 +728,13 @@ void GfxRenderingAPIXsdk::Init() {
         xsdk_log_write("gfx_xsdk: game:/shaders/fast3d couldn't be made; programs compiled aren't kept");
     } else {
         xsdk_log_write("gfx_xsdk: programs are kept in %s", mShaderFolder.c_str());
+    }
+    const XsdkShaderPack& pack = xsdk_fast3d_pack;
+    if (pack.count != 0) {
+        const bool matches =
+            mShaderFolder.size() >= 16 && mShaderFolder.compare(mShaderFolder.size() - 16, 16, pack.folder) == 0;
+        xsdk_log_write("gfx_xsdk: the game's shader pack holds %u programs for %s%s", (unsigned)pack.count, pack.folder,
+                       matches ? "" : ", not these templates or compilers: it isn't used");
     }
 #endif
     const XsdkVertexElement position = { XSDK_USAGE_POSITION, 0, XSDK_VERTEX_FLOAT4, 0, 0, {}, false };

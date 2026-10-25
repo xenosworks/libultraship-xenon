@@ -10,7 +10,11 @@
 #include <cstdio>
 #include <cstring>
 
+#include "gfx_xsdk_pack.h"
 #include "xsdk/xsc.h"
+
+// A game without a pack: every program comes from the disk or glslang.
+extern "C" __attribute__((weak)) const XsdkShaderPack xsdk_fast3d_pack{};
 
 namespace Fast {
 // "F3DX", and the layout of what follows it, raised as it changes.
@@ -153,32 +157,67 @@ static bool CompileSpirv(const std::vector<uint32_t>& spirv, bool fragment, Xsdk
     return taken;
 }
 
+// A kept program's bytes, from its file or the game's pack, taken only if they're all there and nothing more.
+static bool ParseKept(const uint8_t* bytes, size_t size, XsdkCompiledProgram& program) {
+    CacheHeader header;
+    if (size < sizeof(header)) {
+        return false;
+    }
+    memcpy(&header, bytes, sizeof(header));
+    if (header.magic != CACHE_MAGIC || header.layout != CACHE_LAYOUT || header.vertexBytes >= MAX_CACHED_BYTES ||
+        header.pixelBytes >= MAX_CACHED_BYTES || header.vertexLiterals >= MAX_CACHED_BYTES ||
+        header.pixelLiterals >= MAX_CACHED_BYTES || header.vertexBytes % 4 != 0 || header.pixelBytes % 4 != 0 ||
+        size != sizeof(header) + header.vertexBytes + header.pixelBytes +
+                    (header.vertexLiterals + header.pixelLiterals) * sizeof(XsdkLiteral)) {
+        return false;
+    }
+    program.vertex.resize(header.vertexBytes / 4);
+    program.pixel.resize(header.pixelBytes / 4);
+    program.vertexLiterals.resize(header.vertexLiterals);
+    program.pixelLiterals.resize(header.pixelLiterals);
+    program.layout = header.program;
+    const uint8_t* at = bytes + sizeof(header);
+    auto take = [&at](void* to, size_t count) {
+        memcpy(to, at, count);
+        at += count;
+    };
+    take(program.vertex.data(), header.vertexBytes);
+    take(program.pixel.data(), header.pixelBytes);
+    take(program.vertexLiterals.data(), program.vertexLiterals.size() * sizeof(XsdkLiteral));
+    take(program.pixelLiterals.data(), program.pixelLiterals.size() * sizeof(XsdkLiteral));
+    return true;
+}
+
 static bool ReadKept(const std::string& path, XsdkCompiledProgram& program) {
     FILE* const file = fopen(path.c_str(), "rb");
     if (file == nullptr) {
         return false;
     }
-    CacheHeader header;
-    bool sound = fread(&header, sizeof(header), 1, file) == 1 && header.magic == CACHE_MAGIC &&
-                 header.layout == CACHE_LAYOUT && header.vertexBytes < MAX_CACHED_BYTES &&
-                 header.pixelBytes < MAX_CACHED_BYTES && header.vertexLiterals < MAX_CACHED_BYTES &&
-                 header.pixelLiterals < MAX_CACHED_BYTES && header.vertexBytes % 4 == 0 && header.pixelBytes % 4 == 0;
-    if (sound) {
-        program.vertex.resize(header.vertexBytes / 4);
-        program.pixel.resize(header.pixelBytes / 4);
-        program.vertexLiterals.resize(header.vertexLiterals);
-        program.pixelLiterals.resize(header.pixelLiterals);
-        program.layout = header.program;
-        sound = fread(program.vertex.data(), 4, program.vertex.size(), file) == program.vertex.size() &&
-                fread(program.pixel.data(), 4, program.pixel.size(), file) == program.pixel.size() &&
-                fread(program.vertexLiterals.data(), sizeof(XsdkLiteral), program.vertexLiterals.size(), file) ==
-                    program.vertexLiterals.size() &&
-                fread(program.pixelLiterals.data(), sizeof(XsdkLiteral), program.pixelLiterals.size(), file) ==
-                    program.pixelLiterals.size() &&
-                fgetc(file) == EOF;
+    std::vector<uint8_t> bytes;
+    uint8_t chunk[4096];
+    size_t got;
+    // A file past the most a sound one holds is damaged, and isn't read to its end.
+    while (bytes.size() <= MAX_CACHED_BYTES * 3 && (got = fread(chunk, 1, sizeof(chunk), file)) > 0) {
+        bytes.insert(bytes.end(), chunk, chunk + got);
     }
     fclose(file);
-    return sound;
+    return ParseKept(bytes.data(), bytes.size(), program);
+}
+
+// The game's pack's program of this name, if the pack was made from this folder's templates and compilers.
+static bool FromPack(const std::string& folder, const std::string& name, XsdkCompiledProgram& program) {
+    const XsdkShaderPack& pack = xsdk_fast3d_pack;
+    const size_t slash = folder.rfind('/');
+    if (pack.folder == nullptr ||
+        folder.compare(slash == std::string::npos ? 0 : slash + 1, std::string::npos, pack.folder) != 0) {
+        return false;
+    }
+    for (uint32_t i = 0; i < pack.count; i++) {
+        if (name == pack.programs[i].name) {
+            return ParseKept(pack.programs[i].bytes, pack.programs[i].size, program);
+        }
+    }
+    return false;
 }
 
 // Written beside its name and renamed into place, so a crash leaves no file half written.
@@ -217,6 +256,14 @@ bool XsdkShaderProgram(const std::string& folder, const std::string& name, const
     program.layout.block = -1;
     memset(program.layout.samplers, -1, sizeof(program.layout.samplers));
     const std::string path = folder.empty() ? std::string{} : folder + "/" + name + ".f3dx";
+    if (!folder.empty() && FromPack(folder, name, program)) {
+        program.read = true;
+        program.packed = true;
+        return true;
+    }
+    program = {};
+    program.layout.block = -1;
+    memset(program.layout.samplers, -1, sizeof(program.layout.samplers));
     if (!path.empty() && ReadKept(path, program)) {
         program.read = true;
         return true;
